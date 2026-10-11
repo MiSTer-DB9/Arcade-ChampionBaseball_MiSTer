@@ -21,6 +21,7 @@ module ChampionBaseball_VIDEO
 
     // ---- control bits from the LS259 mainlatch (champbas.cpp:970-978)
     input               flip_screen,     // latch bit 3, ALREADY de-inverted by the caller
+    input               crt_flip,        // OSD CRT Flip: pure 180 degree raster mirror on top of the game's flip
 
     // it to latch its sprite position/attribute arrays at the SAME instant this
     output              vsnap,
@@ -122,8 +123,12 @@ module ChampionBaseball_VIDEO
     wire [7:0] h_raw = h_cnt[7:0];
     wire [7:0] v_raw = v_cnt[7:0];
 
-    wire [7:0] sx = h_raw ^ {8{flip_screen}};
-    wire [7:0] sy = v_raw ^ {8{flip_screen}};
+    // flip_scan = game flip ^ CRT Flip. The tiles are a pure function of (sx, sy), so XORing CRT Flip in here mirrors
+    // them exactly; the sprite placement / flipx logic below takes the GAME flip only (flip_screen), and sprites get
+    // CRT Flip from the mirrored readout (lb_raddr = sx) plus the mirrored render line (spr_line).
+    wire       flip_scan = flip_screen ^ crt_flip;
+    wire [7:0] sx = h_raw ^ {8{flip_scan}};
+    wire [7:0] sy = v_raw ^ {8{flip_scan}};
 
     wire [4:0] tile_col = sx[7:3];
     wire [4:0] tile_row = sy[7:3];
@@ -208,7 +213,7 @@ module ChampionBaseball_VIDEO
     // visible in sim as "CREDIT 00" rendering as "REDIT 00".
     // The pipeline fetches one tile ahead, so the tile displayed at h_cnt=0 must
     // sx keeps counting through hblank (h_cnt 256..383 -> sx wraps 0..127), so the
-    wire [7:0] sy_next       = (v_raw + 8'd1) ^ {8{flip_screen}};
+    wire [7:0] sy_next       = (v_raw + 8'd1) ^ {8{flip_scan}};
     wire [4:0] tile_row_next = sy_next[7:3];
     wire [2:0] fy_next       = sy_next[2:0];
 
@@ -219,10 +224,10 @@ module ChampionBaseball_VIDEO
     wire [2:0] ph = h_cnt[2:0];
 
     // The scan direction reverses under flip, so "one tile ahead" reverses too.
-    wire [4:0] fetch_col = flip_screen ? (tile_col - 5'd1) : (tile_col + 5'd1);
+    wire [4:0] fetch_col = flip_scan ? (tile_col - 5'd1) : (tile_col + 5'd1);
 
     // The first tile displayed on a line is tile_col 31 when the scan mirrors,
-    wire [4:0] prime_col = flip_screen ? 5'd31 : 5'd0;
+    wire [4:0] prime_col = flip_scan ? 5'd31 : 5'd0;
     // ------------------------------------------------------------------------
 
     reg  [7:0] code_nxt;
@@ -370,7 +375,7 @@ module ChampionBaseball_VIDEO
     end
 
     // Target line for this render pass = the line about to be displayed.
-    wire [7:0] spr_line = (v_raw + 8'd1);
+    wire [7:0] spr_line = (v_raw + 8'd1) ^ {8{crt_flip}};   // CRT Flip: render the mirrored source line
 
     localparam [8:0] SPR_START = 9'd260;    // just inside hblank (H_VIS = 256)
 

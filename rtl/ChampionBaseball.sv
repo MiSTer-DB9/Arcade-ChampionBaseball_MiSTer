@@ -45,7 +45,7 @@ module ChampionBaseball
     input                hs_we,
     input                hs_active,
 
-    input                crt_flip,     // OSD CRT Flip — XORed into flip_screen in MAIN
+    input                crt_flip,     // OSD CRT Flip — raster mirror in VIDEO (game flip stays separate)
 
     input                pause
 );

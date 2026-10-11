@@ -182,8 +182,8 @@ module ChampionBaseball_MAIN
 
     wire irq_mask     = mainlatch[0];
     wire gfx_bank     = mainlatch[2];
-    // CRT Flip XORs into the game's own cocktail flip -- the one signal the whole
-    wire flip_screen  = (~mainlatch[3]) ^ crt_flip;   // .invert() at :974 undone here
+    // The game's own flip only; CRT Flip goes to VIDEO separately (a raster mirror on top of this)
+    wire flip_screen  = ~mainlatch[3];   // .invert() at :974 undone here
     wire palette_bank = mainlatch[4];
 
     ////////////////////////////////////////////////////////////////////////
@@ -421,6 +421,7 @@ module ChampionBaseball_MAIN
         .cpu_vram_dout(vram_dout),
 
         .flip_screen(flip_screen),
+        .crt_flip(crt_flip),
         .vsnap(vsnap),                 // DETEAR-2026-08-01
         .gfx_bank(gfx_bank),
         .palette_bank(palette_bank),
