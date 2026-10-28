@@ -108,8 +108,8 @@ module hmcs40 (
 
     reg [3:0]  r_lat0, r_lat1, r_lat2, r_lat3, r_lat4, r_lat5, r_lat6, r_lat7; // hmcs40.h:181, m_r[]
     reg [15:0] d_lat;              // D-port output latch (hmcs40.h:182, m_d)
-    reg        d_we_r;             // D-WRITE-STROBE-2026-08-01 (1-cycle pulse)
-    reg        r_we_r;             // R-WRITE-STROBE-2026-08-01 (1-cycle pulse)
+    reg        d_we_r;             // 1-cycle pulse
+    reg        r_we_r;             // 1-cycle pulse
     reg [2:0]  r_we_idx_r;
 
     reg        int0_q, int1_q;     // edge-detect regs for INT0/INT1 pins
@@ -127,8 +127,8 @@ module hmcs40 (
     assign r0_out = r_lat0; assign r1_out = r_lat1; assign r2_out = r_lat2; assign r3_out = r_lat3;
     assign r4_out = r_lat4; assign r5_out = r_lat5; assign r6_out = r_lat6; assign r7_out = r_lat7;
     assign d_out  = d_lat;
-    assign d_we    = d_we_r;   // D-WRITE-STROBE-2026-08-01
-    assign r_we    = r_we_r;   // R-WRITE-STROBE-2026-08-01
+    assign d_we    = d_we_r;
+    assign r_we    = r_we_r;
     assign r_we_idx = r_we_idx_r;
 
     function automatic [3:0] read_r(input [2:0] idx);
@@ -198,7 +198,7 @@ module hmcs40 (
     reg [4:0]  n_pc_upper;
     reg [3:0]  n_r_any; reg [2:0] n_r_any_idx; reg n_r_any_we;
     reg [15:0] n_d;
-    reg        n_d_we;             // D-WRITE-STROBE-2026-08-01
+    reg        n_d_we;
     reg        push_req;           // request a stack push this cycle (return addr = next_pc_w)
     reg        pop_req;            // request a stack pop this cycle
     reg        ram_we;
@@ -229,7 +229,7 @@ module hmcs40 (
             n_pc_upper = pc_upper;
             n_r_any_we = 1'b0; n_r_any_idx = 3'd0; n_r_any = 4'h0;
             n_d = d_lat;
-            n_d_we = 1'b0;    // D-WRITE-STROBE-2026-08-01
+            n_d_we = 1'b0;
             push_req = 1'b0; pop_req = 1'b0;
             ram_we = 1'b0; ram_we_addr = 8'h0; ram_we_data = 4'h0;
             lpu_taken_now = 1'b0; cal_taken_now = 1'b0;
@@ -479,8 +479,8 @@ module hmcs40 (
             r_lat0<=4'hF; r_lat1<=4'hF; r_lat2<=4'hF; r_lat3<=4'hF;
             r_lat4<=4'hF; r_lat5<=4'hF; r_lat6<=4'hF; r_lat7<=4'hF; // reset_io: m_polarity (CMOS=all 1s)
             d_lat <= 16'hFFFF;
-            d_we_r <= 1'b0;        // D-WRITE-STROBE-2026-08-01
-            r_we_r <= 1'b0; r_we_idx_r <= 3'd0;   // R-WRITE-STROBE-2026-08-01
+            d_we_r <= 1'b0;
+            r_we_r <= 1'b0; r_we_idx_r <= 3'd0;
             eint_line <= 1'b0;
             lpu_pend <= 2'b00;
             block_int <= 1'b0;
@@ -501,7 +501,7 @@ module hmcs40 (
             int1_q <= int1_in;
             // one clk wide; the S_EXEC commit below re-asserts it when the
             d_we_r <= 1'b0;
-            r_we_r <= 1'b0;   // R-WRITE-STROBE-2026-08-01
+            r_we_r <= 1'b0;
 
             case (state)
                 S_RESET: state <= S_TOP;
@@ -551,7 +551,7 @@ module hmcs40 (
                     s <= n_s; c <= n_c;
                     pc_upper <= n_pc_upper;
                     d_lat  <= n_d;
-                    d_we_r <= n_d_we;   // D-WRITE-STROBE-2026-08-01
+                    d_we_r <= n_d_we;
                     r_we_r     <= n_r_any_we;
                     r_we_idx_r <= n_r_any_idx;
                     if (n_r_any_we) begin

@@ -19,16 +19,16 @@ module ChampionBaseball_VIDEO
     input               cpu_vram_we,
     output       [7:0]  cpu_vram_dout,
 
-    // ---- control bits from the LS259 mainlatch (champbas.cpp:970-978)
+    // ---- control bits from the LS259 mainlatch
     input               flip_screen,     // latch bit 3, ALREADY de-inverted by the caller
     input               crt_flip,        // OSD CRT Flip: pure 180 degree raster mirror on top of the game's flip
 
-    // it to latch its sprite position/attribute arrays at the SAME instant this
+    // vsnap: once-per-frame snapshot strobe; the main board latches its sprite arrays on it too
     output              vsnap,
     input               gfx_bank,        // latch bit 2
     input               palette_bank,    // latch bit 4
 
-    // ---- hardware variant. exctsccr family (set_id 0x08-0x0A) differs in the
+    // ---- hardware variant: the exctsccr family (set_id 08-0A) has 3bpp tiles and two sprite banks
     input               is_exctsccr,
     input               is_talbot,       // set_id 0x07 — half-size gfx regions
 
@@ -44,8 +44,7 @@ module ChampionBaseball_VIDEO
     output       [9:0]  prom_addr,
     input        [7:0]  prom_data,
 
-    // ---- sprite sources. champbas splits them across TWO memories:
-    //   code/colour/flip in MAIN RAM 0x8FF0-0x8FFF   (champbas.cpp:395-403)
+    // ---- sprite sources: Y / X in the sprite position RAMs (A060 / A040), code / colour / flip in main RAM 8FF0-8FFF
     output       [3:0]  spr_pos_addr,
     output              spr_pos_bank,   // 0 = spriteram $A060, 1 = spriteram2 $A040
     input        [7:0]  spr_pos_data,
@@ -56,7 +55,7 @@ module ChampionBaseball_VIDEO
     output      [12:0]  gfx3_addr,
     input        [7:0]  gfx3_data,
 
-    // ---- palette PROM snoop (see PALETTE PROM note below)
+    // ---- palette / LUT PROM snoop of the index-7 download
     input               clk_dl,
     input               ioctl_download,
     input        [7:0]  ioctl_index,
@@ -71,7 +70,11 @@ module ChampionBaseball_VIDEO
     output              HSync,
     output              VSync,
     output              HBlank,
-    output              VBlank
+    output              VBlank,
+
+    // tile RAM / shadow = pool blocks 3-4 in the dispatcher (through the main board)
+    output ram_pool_pkg::pram_i_t [1:0] pr_i,
+    input  ram_pool_pkg::pram_o_t [1:0] pr_o
 );
 
     ////////////////////////////////////////////////////////////////////////
@@ -85,8 +88,8 @@ module ChampionBaseball_VIDEO
     localparam HS_END    = 9'd304;
 
     localparam V_TOTAL   = 9'd264;
-    localparam V_VIS_LO  = 9'd16;    // first visible line  (MAME visarea min_y)
-    localparam V_VIS_HI  = 9'd240;   // one past last        (MAME visarea max_y = 239)
+    localparam V_VIS_LO  = 9'd16;    // first visible line
+    localparam V_VIS_HI  = 9'd240;   // one past the last visible line
     localparam VS_START  = 9'd244;
     localparam VS_END    = 9'd248;
 
@@ -117,7 +120,7 @@ module ChampionBaseball_VIDEO
 
     ////////////////////////////////////////////////////////////////////////
     // Screen -> world coordinates
-    // champbas has no scroll, so world coords ARE screen coords; flip is a
+    // no scroll: world = screen coordinates; flip is an XOR of both
     ////////////////////////////////////////////////////////////////////////
 
     wire [7:0] h_raw = h_cnt[7:0];
@@ -145,10 +148,10 @@ module ChampionBaseball_VIDEO
     wire [10:0] vram_addr_mux;
 
     ////////////////////////////////////////////////////////////////////////
-    // ACTIVE DISPLAY (42326 vs 34543 in blanking). The board has NO scroll
+    // Tile RAM shadow: copied once per frame, so the tilemap and the sprites change on the same frame
     ////////////////////////////////////////////////////////////////////////
 
-    // Snapshot late in vblank (active starts at v_cnt 16) so the copy captures
+    // snapshot late in vblank (active starts at v_cnt 16), after the game's vblank updates
     wire       snap_trig = (v_cnt == 9'd12) && (h_cnt == 9'd0);
     reg        snap_d;
     always_ff @(posedge clk) snap_d <= snap_trig;
@@ -169,40 +172,31 @@ module ChampionBaseball_VIDEO
             if (cp_cnt == 12'd2047) cp_run <= 1'b0;
             cp_cnt <= cp_cnt + 12'd1;
         end
-        // dpram_dc q is registered: data for the address issued this cycle
+        // q is registered: the copy address / write enable follow one clock later
         cp_addr_d <= cp_cnt[10:0];
         cp_we_d   <= cp_run;
     end
 
-    dpram_dc #(.widthad_a(11), .width_a(8)) tile_ram
-    (
-        .clock_a(clk),
-        .address_a(cpu_vram_addr),
-        .data_a(cpu_vram_din),
-        .wren_a(cpu_vram_we),
-        .q_a(cpu_vram_dout),
+    ram_pool_pkg::pram_i_t tram_i, tsh_i;
+    ram_pool_pkg::pram_o_t tram_o, tsh_o;
+    assign pr_i = {tsh_i, tram_i};
+    assign {tsh_o, tram_o} = pr_o;
+    assign tram_i.a_addr = 15'(cpu_vram_addr);
+    assign tram_i.a_d    = cpu_vram_din;
+    assign tram_i.a_we   = cpu_vram_we;
+    assign tram_i.b_addr = 15'(cp_cnt[10:0]);
+    assign tram_i.b_d    = 8'd0;
+    assign tram_i.b_we   = 1'b0;
+    assign cpu_vram_dout = tram_o.a_q;
+    assign cp_data = tram_o.b_q;
 
-        .clock_b(clk),
-        .address_b(cp_cnt[10:0]),
-        .data_b(8'd0),
-        .wren_b(1'b0),
-        .q_b(cp_data)
-    );
-
-    dpram_dc #(.widthad_a(11), .width_a(8)) tile_shadow
-    (
-        .clock_a(clk),
-        .address_a(cp_addr_d),
-        .data_a(cp_data),
-        .wren_a(cp_we_d),
-        .q_a(),
-
-        .clock_b(clk),
-        .address_b(vram_addr_mux),
-        .data_b(8'd0),
-        .wren_b(1'b0),
-        .q_b(vram_rdata)
-    );
+    assign tsh_i.a_addr = 15'(cp_addr_d);
+    assign tsh_i.a_d    = cp_data;
+    assign tsh_i.a_we   = cp_we_d;
+    assign tsh_i.b_addr = 15'(vram_addr_mux);
+    assign tsh_i.b_d    = 8'd0;
+    assign tsh_i.b_we   = 1'b0;
+    assign vram_rdata = tsh_o.b_q;
 
     ////////////////////////////////////////////////////////////////////////
     // Tilemap fetch pipeline
@@ -210,23 +204,20 @@ module ChampionBaseball_VIDEO
     //   fx=7: promote _nxt -> _lat, becomes the tile displayed from next fx=0
     ////////////////////////////////////////////////////////////////////////
 
-    // visible in sim as "CREDIT 00" rendering as "REDIT 00".
-    // The pipeline fetches one tile ahead, so the tile displayed at h_cnt=0 must
-    // sx keeps counting through hblank (h_cnt 256..383 -> sx wraps 0..127), so the
+    // the pipeline fetches one tile ahead, so column 0 of the next line is primed in hblank (h_cnt 376-383)
     wire [7:0] sy_next       = (v_raw + 8'd1) ^ {8{flip_scan}};
     wire [4:0] tile_row_next = sy_next[7:3];
     wire [2:0] fy_next       = sy_next[2:0];
 
     wire       prime         = (h_cnt >= 9'd376);
 
-    // The fetch FSM below MUST be sequenced by a monotonically ascending phase.
-    // DOWN, so fx ran 7->0 and the pipeline executed BACKWARDS — the fx=7
+    // the fetch FSM runs on h_cnt[2:0], which always ascends (fx counts down under flip)
     wire [2:0] ph = h_cnt[2:0];
 
     // The scan direction reverses under flip, so "one tile ahead" reverses too.
     wire [4:0] fetch_col = flip_scan ? (tile_col - 5'd1) : (tile_col + 5'd1);
 
-    // The first tile displayed on a line is tile_col 31 when the scan mirrors,
+    // first tile on a line: column 31 when the scan mirrors, else 0
     wire [4:0] prime_col = flip_scan ? 5'd31 : 5'd0;
     // ------------------------------------------------------------------------
 
@@ -237,33 +228,30 @@ module ChampionBaseball_VIDEO
     reg  [4:0] color_lat;
     reg  [7:0] byte_lo_lat, byte_hi_lat;
 
-    // exctsccr plane-2 (3bpp). Fetched in PARALLEL with planes 0/1 on its own
-    // code[8]: init_exctsccr puts 6_c5's low nibbles at gfx1 0x2000-0x2FFF and
+    // exctsccr plane 2 (3bpp tiles): fetched in parallel with planes 0/1 from its own ROM port (index 8)
     reg  [3:0] p2_hi_nxt, p2_lo_nxt, p2_hi_lat, p2_lo_lat;
     reg        p2_hi_nib, p2_lo_nib;
     reg [12:0] gfx_p3_addr_r;
     assign gfx_p3_addr = spr_busy ? spr_p3_addr : gfx_p3_addr_r;
 
     reg [13:0] gfx_addr_r;
-    // The gfx ROM has one read port, shared between the tilemap fetch and the
+    // one gfx ROM read port, shared by the tilemap fetch and the sprite engine (sprites win while busy)
     assign gfx_addr    = spr_busy ? spr_gfx_addr : gfx_addr_r;
 
-    // sprites occupy 0x2000-0x3FFF. Hence the leading 1'b0.
+    // tiles are in the lower half of the gfx ROM (sprites 2000-3FFF), hence the leading 1'b0
     wire [8:0] code_full = {gfx_bank, code_nxt};
 
     always_ff @(posedge clk) begin
         if (cen_pix) begin
             if (prime) begin
-                // Prime column 0 of the NEXT line. Sequenced directly by h_cnt (fixed
+                // prime column 0 of the next line, sequenced directly by h_cnt
                 case (h_cnt)
                     9'd376: vram_raddr <= {1'b0, tile_row_next, prime_col};
                     9'd377: begin
                         code_nxt   <= vram_rdata;
                         vram_raddr <= {1'b1, tile_row_next, prime_col};
                     end
-                    // code, the attribute and both planes-0/1 gfx bytes, but
-                    // NEVER plane 2, and never promoted p2_*_lat. So the first
-                    // "CREDIT 00 / 1ST GAME renders green instead of white"
+                    // the prime fetches plane 2 too and promotes p2_*_lat (else the first column draws in the wrong colour)
                     9'd378: begin
                         color_nxt  <= vram_rdata[4:0];
                         gfx_addr_r <= {1'b0, code_full, 1'b1, fy_next};
@@ -298,9 +286,7 @@ module ChampionBaseball_VIDEO
                     vram_raddr <= {1'b1, tile_row, fetch_col};   // +0x400 attribute plane
                 end
                 3'd2: begin
-                    // champbas : colour = (attr & 0x1f) | 0x20   (champbas.cpp:348)
-                    // exctsccr : colour = (attr & 0x0f)          (champbas.cpp:356)
-                    // Low 5 bits are stored either way; champbas's |0x20 is a constant
+                    // colour: champbas (attr & 1F) | 20, exctsccr attr & 0F; the low 5 bits are stored either way
                     color_nxt   <= vram_rdata[4:0];
                     gfx_addr_r  <= {1'b0, code_full, 1'b1, fy};   // byte at y+8
                     gfx_p3_addr_r <= {1'b0, code_full[7:0], 1'b1, fy};
@@ -348,13 +334,13 @@ module ChampionBaseball_VIDEO
 
     // champbas : pen = {1, colour[4:0], pix[1:0]}      (colour |0x20, 2bpp)
     // exctsccr : pen = {0, colour[3:0], pix[2:0]}      (colour &0x0f, 3bpp,
-    //            chars at palette base 0x000 with 8 pens per colour, :1195)
+    //            chars at palette base 000, 8 pens per colour)
     wire [7:0] tile_pen = is_exctsccr ? {1'b0, color_lat[3:0], p2_bit, tile_pix}
                                       : {1'b1, color_lat[4:0], tile_pix};
 
     ////////////////////////////////////////////////////////////////////////
-    // SPRITE ENGINE  (champbas.cpp:387-418)
-    // 8 sprites, 16x16, 2bpp. MAME iterates offs = 0x0E down to 0 step -2,
+    // Sprite engine
+    // 8 sprites per bank, 16x16, 2bpp (exctsccr: a 3bpp and a 4bpp bank), drawn 7 down to 0:
     //   code  = (attr[offs]   >> 2 & 0x3f) | (gfx_bank << 6)
     //   color = (attr[offs+1] & 0x1f)      | (palette_bank << 6)
     ////////////////////////////////////////////////////////////////////////
@@ -379,13 +365,13 @@ module ChampionBaseball_VIDEO
 
     localparam [8:0] SPR_START = 9'd260;    // just inside hblank (H_VIS = 256)
 
-    // The buffer being WRITTEN is not the one being displayed, so it can be
+    // the buffer being written isn't the one displayed, so it is cleared during the active window
     wire       clr_active = (h_cnt < H_VIS);
     wire [7:0] clr_addr   = h_cnt[7:0];
 
     // 16 slots x 40 phases = 640 clk, starting at h_cnt 260 -> ends h_cnt 340,
     // before the tilemap's column-0 prime window opens at 376.
-    // MAME draws 3bpp first then 4bpp, each offs 0x0E->0, so later writes win.
+    // 3bpp bank first, then 4bpp, each 7 down to 0, so later writes win
     reg  [3:0] spr_slot;
     reg  [5:0] spr_phase;
     reg        spr_busy;
@@ -398,15 +384,12 @@ module ChampionBaseball_VIDEO
     reg        s_active;
 
     ////////////////////////////////////////////////////////////////////////
-    // MAME draws the 4bpp bank with transpen_mask(gfx, colour, 0x10)
-    //     ctabentry = (color_prom[0x100 + i] & 0x0f) | 0x10
-    // that MAME drops were drawn in colour-index 0x10 — the black masks
+    // 4bpp bank transparency: a pen is opaque when its LUT entry (PROM 0x120 + pen) is non-zero
     ////////////////////////////////////////////////////////////////////////
 
     reg [255:0] lut4_opaque;
 
-    // index is (addr - 0x120), NOT addr[7:0] — 0x120 & 0xFF = 0x20, which
-    // rotated the whole mask by 32 entries and left the 4bpp team still boxed.
+    // mask index = download address - 0x120 (not addr[7:0])
     wire [8:0] lut4_off = ioctl_addr[8:0] - 9'h120;
 
     always_ff @(posedge clk_dl) begin
@@ -416,7 +399,7 @@ module ChampionBaseball_VIDEO
     end
 
     wire       s_bank = spr_slot[3];                 // 0 = first bank, 1 = 4bpp bank
-    wire [2:0] s_num  = 3'd7 - spr_slot[2:0];        // MAME order: 7 first, 0 last
+    wire [2:0] s_num  = 3'd7 - spr_slot[2:0];        // 7 first, 0 last
     wire       s_is4  = is_exctsccr & s_bank;
     wire       s_is3  = is_exctsccr & ~s_bank;
     wire       slot_used = is_exctsccr | ~s_bank;    // champbas uses only bank 0
@@ -429,22 +412,17 @@ module ChampionBaseball_VIDEO
 
     wire [7:0] s_top_raw = 8'd255 - s_y;
 
-    // two SEPARATE mirrors so each can be tuned alone.
-    //   "wrong place, right way up" -> s_top_eff   (placement, origin-only)
-    //   "right place, inside out"   -> s_row XOR   (internal order)
-    // but the two teams came out swapped left<->right and the trophy sign moved
+    // placement: top = 255 - Y with no flip term; the game flip mirrors X origin-only (lb_waddr below)
     wire [7:0] s_top     = s_top_raw;
     wire [7:0] s_dy      = spr_line - s_top;
     wire       s_on_line = (s_dy < 8'd16);
-    // MEASURED, not derived: comparing "FPGA - Soccer 2.png" against
-    // height where MAME has them at 0.60-0.65 — a MIRROR (0.60->0.40), not a
-    // shift — and the trophy sign moves left->right. Raw X is the DISPLAYED
+    // the game flip terms on s_flipx / lb_waddr are load-bearing: exctsccr runs flipped
     wire       s_flipx   = ~s_a0[0] ^ flip_screen;
     wire       s_flipy   = ~s_a0[1];
 
     //   champbas : code = (a0>>2 & 0x3f) | gfx_bank<<6      colour = a1&0x1f | palbank<<6
-    //   3bpp     : code = (a0>>2 & 0x3f) | (a1<<2 & 0x40)   colour = a1&0x0f   (:433-436)
-    //   4bpp     : code =  a0>>2 & 0x3f                     colour = a1&0x0f   (:451-454)
+    //   3bpp     : code = (a0>>2 & 0x3f) | (a1<<2 & 0x40)   colour = a1&0x0f
+    //   4bpp     : code =  a0>>2 & 0x3f                     colour = a1&0x0f
     wire [6:0] s_code = s_is3 ? {s_a1[4], s_a0[7:2]}
                       : s_is4 ? {1'b0,    s_a0[7:2]}
                               : {gfx_bank, s_a0[7:2]};
@@ -469,8 +447,7 @@ module ChampionBaseball_VIDEO
     wire [5:0] s_off = {s_row[3], s_k, s_row[2:0]};   // byte within the 64-byte sprite
 
     // planes 0/1 (all variants except 4bpp) live in the UPPER half of index 2.
-    // Talbot's gfx1/gfx2 are 0x1000 each (champbas: 0x2000 each), so the MRA's
-    // sprite code is 6 bits -- MAME masks 0x3f and talbot nops gfxbank
+    // Talbot's gfx regions are 0x1000 each (champbas 0x2000): sprites at 1000-1FFF, 6-bit code, no gfx bank
     wire [13:0] spr_gfx_addr = is_talbot ? {2'b01, s_code[5:0], s_off}
                                          : {1'b1,  s_code,      s_off};
     // 3bpp plane 2: gfx2's second half = 6_c5[0x1000..] nibble-split, index 8 upper 4K
@@ -534,7 +511,7 @@ module ChampionBaseball_VIDEO
                         6'd4: s_a1 <= attr_src;
                         6'd5: begin
                             s_active <= s_on_line;
-                            // the pair above — the attribute XOR, which mirrors
+                            // row order: the attribute's Y flip
                             s_row    <= s_flipy ? (4'd15 - s_dy[3:0]) : s_dy[3:0];
                         end
                         default: ;
@@ -548,11 +525,11 @@ module ChampionBaseball_VIDEO
                         end
                         if (cph == 3'd2) s_byteB <= gfx3_data;
 
-                        // keep the direct `pixel != 0` test; only the 4bpp bank
+                        // pen 0 is transparent; the 4bpp bank uses the LUT opacity mask
                         if (cph >= 3'd3 && s_active && slot_used
                             && (s_is4 ? lut4_opaque[s_pen] : (s_pix != 4'd0))) begin
                             lb_we    <= 1'b1;
-                            // raw-X mirror, in the ORIGIN-ONLY form the vault
+                            // game flip: raw-X mirror, origin only
                             lb_waddr <= (flip_screen ? (8'd240 - (s_x - 8'd16))
                                                      : (s_x - 8'd16)) + {4'd0, s_px};
                             lb_wdata <= {1'b1, s_is4, s_pen};
@@ -567,7 +544,7 @@ module ChampionBaseball_VIDEO
 
     assign gfx3_addr = spr_g3_addr;
 
-    // VRAM port B is shared. The exctsccr 3bpp bank reads its sprite attributes
+    // VRAM port B is shared: the exctsccr 3bpp bank reads its sprite attributes from tile RAM 000-00F
     assign vram_addr_mux = (spr_busy && s_is3) ? {7'd0, spr_attr_addr} : vram_raddr;
 
     wire       spr_opaque = lb_q[9];
@@ -579,30 +556,28 @@ module ChampionBaseball_VIDEO
     //   stage 1: pen[7:0] -> LUT PROM -> 4-bit colour index low nibble
     //   stage 2: {palette_bank, lut[3:0]} -> 32-entry palette PROM -> RGB
     //   ctabentry = (lut[i & 0xff] & 0x0f) | ((i & 0x100) >> 4)
-    // (palette offset palette_bank<<8) and the sprite path (colour |=
     // LUT PROM sits at 0x020 in the index-7 region (palette PROM is 0x000-0x01F).
     ////////////////////////////////////////////////////////////////////////
 
     wire [7:0] active_pen = spr_opaque ? spr_pen : tile_pen;
 
-    // exctsccr indexes its LUT through a bitswap (champbas.cpp:324):
+    // exctsccr indexes its LUT through a bitswap
     wire [7:0] pen_swapped = {active_pen[2], active_pen[7], active_pen[6], active_pen[5],
                               active_pen[4], active_pen[3], active_pen[1], active_pen[0]};
 
     wire [7:0] lut_index = is_exctsccr ? pen_swapped : active_pen;
 
-    // exctsccr_palette (champbas.cpp:329-334) splits the pen space in two:
+    // exctsccr splits the pen space in two:
     //   pens 0x000-0x0FF (chars + 3bpp sprites):
     //       ctabentry = (color_prom[bitswap(i)] & 0x0f) | ((i & 0x80) >> 3)
-    //   pens 0x100-0x1FF (4bpp sprites, :330):
+    //   pens 0x100-0x1FF (4bpp sprites):
     //       ctabentry = (color_prom[0x100 + i] & 0x0f) | 0x10
-    // (prom2.8r, region 0x120+ once the 0x20 palette PROM is skipped), and
+    //   (PROM 2 at 0x120 in the index-7 download)
     wire pen_is4 = spr_opaque & spr_is4;
 
     assign prom_addr = pen_is4 ? (10'h120 + {2'd0, active_pen})
                                : (10'h020 + {2'd0, lut_index});
 
-    //                                        : {palette_bank,  prom_data[3:0]};
     wire [4:0] color_index = pen_is4     ? {1'b1,          prom_data[3:0]}
                            : is_exctsccr ? {active_pen[7], prom_data[3:0]}
                                          : {palette_bank,  prom_data[3:0]};
@@ -621,9 +596,8 @@ module ChampionBaseball_VIDEO
     wire [7:0] pal_byte = pal_prom[color_index];
 
     ////////////////////////////////////////////////////////////////////////
-    // Resistor-network DAC (champbas.cpp:243-251)
-    // 0x21 / 0x47 / 0x97 triple (the same constants exctsccr_palette :301
-    // 0x51 / 0xAE. Each channel's weights sum to 0xFF.
+    // Resistor-network DAC
+    // R / G: 0x21 / 0x47 / 0x97; champbas blue 0x51 / 0xAE. Each channel's weights sum to 0xFF.
     ////////////////////////////////////////////////////////////////////////
 
     function automatic [7:0] rgb3;
@@ -642,8 +616,7 @@ module ChampionBaseball_VIDEO
 
     wire [7:0] r_lvl = rgb3(pal_byte[0], pal_byte[1], pal_byte[2]);
     wire [7:0] g_lvl = rgb3(pal_byte[3], pal_byte[4], pal_byte[5]);
-    // Blue differs between the two palette functions. champbas normalises its
-    // (champbas.cpp:310-313), so its blue tops out at 0xDE rather than 0xFF.
+    // blue: champbas 2 bits (0x51 / 0xAE); exctsccr the 3-bit weights without the low bit, so it tops out at 0xDE
     wire [7:0] b_lvl = is_exctsccr ? rgb3(1'b0, pal_byte[6], pal_byte[7])
                                    : rgb2(pal_byte[6], pal_byte[7]);
 

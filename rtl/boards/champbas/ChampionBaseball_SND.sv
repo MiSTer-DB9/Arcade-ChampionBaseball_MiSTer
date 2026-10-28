@@ -1,7 +1,7 @@
 //============================================================================
 //
-//  ChampionBaseball_SND.sv — champbas sound board: Z80 driving a DAC only.
-//  The AY is on the MAIN board (champbas.cpp:579); this CPU never sees it.
+//  ChampionBaseball_SND.sv - champbas sound board: Z80 driving a 6-bit DAC. The AY is on the main board
+//  (written by the main CPU); this CPU never sees it, the AY is mixed here.
 //
 //============================================================================
 
@@ -24,13 +24,19 @@ module ChampionBaseball_SND
     output       [15:0]  rom_addr,
     input         [7:0]  rom_data,
 
-    output signed [15:0] sound_out
+    output signed [15:0] sound_out,
+
+    // sound Z80 (z80_1), AY (ay_0) and sound RAM (pool block 5) in the dispatcher
+    output chip_pool_pkg::z80r_i_t z80_1_i,
+    input  chip_pool_pkg::z80r_o_t z80_1_o,
+    output chip_pool_pkg::ayr_i_t  ay_0_i,
+    input  chip_pool_pkg::ay_o_t   ay_0_o,
+    output ram_pool_pkg::pram_i_t  pr_i,
+    input  ram_pool_pkg::pram_o_t  pr_o
 );
 
     ////////////////////////////////////////////////////////////////////////
-    // Address decode — champbas_sound_map (champbas.cpp:659)
-    // decodes it. Corroborated by the dasm: `ld sp,$E3FF` at $0001 puts the
-    // stack at the top of RAM, and $0005/$0008/$0011 hit A000/8000/C000.
+    // Address decode (8K pages; the stack at E3FF confirms RAM at E000)
     ////////////////////////////////////////////////////////////////////////
 
     wire [15:0] A;
@@ -49,7 +55,7 @@ module ChampionBaseball_SND
     assign rom_addr = A;
 
     ////////////////////////////////////////////////////////////////////////
-    // Sound latch (MAME GENERIC_LATCH_8).
+    // Sound latch
     ////////////////////////////////////////////////////////////////////////
 
     reg [7:0] latch_reg = 8'd0;
@@ -61,7 +67,7 @@ module ChampionBaseball_SND
     end
 
     ////////////////////////////////////////////////////////////////////////
-    // 6-bit R2R DAC at $C000. The dasm initialises it to $20 at $000F-$0011,
+    // 6-bit R2R DAC at C000; 0x20 = mid-scale (the program sets it at boot)
     ////////////////////////////////////////////////////////////////////////
 
     reg [5:0] dac_reg = 6'd32;
@@ -80,26 +86,17 @@ module ChampionBaseball_SND
 
     wire [7:0] ram_dout;
 
-    dpram_dc #(.widthad_a(10), .width_a(8)) sound_ram
-    (
-        .clock_a(clk),
-        .address_a(A[9:0]),
-        .data_a(cpu_dout),
-        .wren_a(cen_cpu & mem_wr & cs_ram),
-        .q_a(ram_dout),
-
-        .clock_b(clk),
-        .address_b(10'd0),
-        .data_b(8'd0),
-        .wren_b(1'b0),
-        .q_b()
-    );
+    assign pr_i.a_addr = 15'(A[9:0]);
+    assign pr_i.a_d    = cpu_dout;
+    assign pr_i.a_we   = cen_cpu & mem_wr & cs_ram;
+    assign pr_i.b_addr = 15'(10'd0);
+    assign pr_i.b_d    = 8'd0;
+    assign pr_i.b_we   = 1'b0;
+    assign ram_dout = pr_o.a_q;
 
     ////////////////////////////////////////////////////////////////////////
-    // AY-3-8910 (jt49 by Jotego). Pattern taken from the hardware-verified
-    // champbas uses ay8910_device::data_address_w, so $7000 = DATA and
-    // $7001 = ADDRESS. In AY bus terms: address latch = {bdir,bc1} = 11,
-    // The strobes MUST be stretched: the Z80 write pulse is ~24 clk wide while
+    // AY-3-8910 (pool slot ay_0): 7000 = data, 7001 = address (address latch = BDIR/BC1 11, data = 10).
+    // The strobe is stretched to the next AY clock enable: the Z80 write pulse is shorter than an AY cycle
     ////////////////////////////////////////////////////////////////////////
 
     reg        ay_pending = 1'b0;
@@ -117,22 +114,9 @@ module ChampionBaseball_SND
 
     wire [7:0] ayA_raw, ayB_raw, ayC_raw;
 
-    jt49_bus #(.COMP(3'b100)) ay
-    (
-        .rst_n  (~reset),
-        .clk    (clk),
-        .clk_en (cen_ay),
-        .bdir   (ay_pending),
-        .bc1    (ay_bc1_lat),
-        .din    (ay_din_lat),
-        .sel    (1'b1),
-        .dout   (),
-        .A      (ayA_raw),
-        .B      (ayB_raw),
-        .C      (ayC_raw),
-        .IOA_in (8'hFF),
-        .IOB_in (8'hFF)
-    );
+    assign ayA_raw = ay_0_o.a;
+    assign ayB_raw = ay_0_o.b;
+    assign ayC_raw = ay_0_o.c;
 
     // DC removal, same shaping as TimePilot: raw byte shifted up into 16 bits
     reg div = 1'b0;
@@ -149,7 +133,7 @@ module ChampionBaseball_SND
     ( .clk(clk), .cen(cen_dcrm), .rst(reset), .din({3'd0, ayC_raw, 5'd0}), .dout(ayC_dc) );
 
     ////////////////////////////////////////////////////////////////////////
-    // Mix. MAME routes the AY at 0.3 and the DAC at 0.7 (:1002, :1004), so the
+    // Mix: AY 0.3, DAC 0.7 of the output (approximated with shifts below)
     ////////////////////////////////////////////////////////////////////////
 
     wire signed [17:0] ay_sum = {{2{ayA_dc[15]}}, ayA_dc}
@@ -176,23 +160,27 @@ module ChampionBaseball_SND
         else               cpu_din = 8'hFF;
     end
 
-    T80s cpu
-    (
-        .RESET_n(~reset),
-        .CLK(clk),
-        .CEN(cen_cpu & ~pause),
-        .WAIT_n(1'b1),
-        .INT_n(1'b1),          // champbas has no sound IRQ — the CPU polls
-        .NMI_n(1'b1),
-        .BUSRQ_n(1'b1),
-        .M1_n(m1_n),
-        .MREQ_n(mreq_n),
-        .IORQ_n(iorq_n),
-        .RD_n(rd_n),
-        .WR_n(wr_n),
-        .A(A),
-        .DI(cpu_din),
-        .DO(cpu_dout)
-    );
+    assign A      = z80_1_o.a;
+    assign cpu_dout = z80_1_o.dout;
+    assign m1_n   = z80_1_o.m1_n;
+    assign mreq_n = z80_1_o.mreq_n;
+    assign iorq_n = z80_1_o.iorq_n;
+    assign rd_n   = z80_1_o.rd_n;
+    assign wr_n   = z80_1_o.wr_n;
+
+
+    // pool slot inputs (driven here, after every signal they use is declared)
+    assign z80_1_i.reset_n = ~reset;
+    assign z80_1_i.ce      = cen_cpu & ~pause;
+    assign z80_1_i.int_n   = 1'b1;
+    assign z80_1_i.nmi_n   = 1'b1;
+    assign z80_1_i.di      = cpu_din;
+    assign ay_0_i.rst_n  = ~reset;
+    assign ay_0_i.ce     = cen_ay;
+    assign ay_0_i.bdir   = ay_pending;
+    assign ay_0_i.bc1    = ay_bc1_lat;
+    assign ay_0_i.din    = ay_din_lat;
+    assign ay_0_i.ioa_in = 8'hFF;
+    assign ay_0_i.iob_in = 8'hFF;
 
 endmodule

@@ -43,7 +43,7 @@ module champbas_rom
     wire wr_gfx_p3   = ioctl_wr && ioctl_download && (ioctl_index == 8'd8);
     wire wr_gfx3     = ioctl_wr && ioctl_download && (ioctl_index == 8'd9);
 
-    // Index 3 (hiscore cfg) and index 4 (nvram) are handled elsewhere —
+    // index 3 (hiscore config) and index 4 (NVRAM) are not ROM regions
 
     ////////////////////////////////////////////////////////////////////////
     // Index 5 — set-id byte (NOT a BRAM region). Single byte, address 0.
@@ -60,7 +60,7 @@ module champbas_rom
     end
 
     ////////////////////////////////////////////////////////////////////////
-    // Index 0 — maincpu: MAME ROM_REGION "maincpu", main Z80 program.
+    // Index 0 - main Z80 program.
     // Max real use 0x8000 (champbb2, non-contiguous — padded in its MRA).
     ////////////////////////////////////////////////////////////////////////
 
@@ -77,8 +77,8 @@ module champbas_rom
     );
 
     ////////////////////////////////////////////////////////////////////////
-    // Index 1 — audiocpu: MAME ROM_REGION "audiocpu", audio Z80 program.
-    // Max real use 0x9000 (exctsccr, 5-part region). Rounded up to a 64K
+    // Index 1 - sound Z80 program.
+    // Max real use 0x9000 (exctsccr, 5 ROMs); 64K so the full Z80 address indexes it.
     ////////////////////////////////////////////////////////////////////////
 
     dpram_dc #(.widthad_a(16), .width_a(8)) audiocpu_rom
@@ -94,8 +94,8 @@ module champbas_rom
     );
 
     ////////////////////////////////////////////////////////////////////////
-    // Index 2 — gfx_p01: MAME ROM_REGION "gfx1"/"gfx2", planes 0/1 of
-    // an address bit downstream (0x2000 for champbas family, 0x1000 for
+    // Index 2 - gfx planes 0/1, tiles then sprites; the video picks the half with
+    // an address bit (0x2000 per half for the champbas family, 0x1000 for Talbot).
     ////////////////////////////////////////////////////////////////////////
 
     dpram_dc #(.widthad_a(14), .width_a(8)) gfx_p01_rom
@@ -111,7 +111,7 @@ module champbas_rom
     );
 
     ////////////////////////////////////////////////////////////////////////
-    // Index 6 — mcu: MAME ROM_REGION "alpha_8201:mcu", ALPHA-8201/8302/8303
+    // Index 6 - ALPHA-8201 / 8302 MCU program.
     ////////////////////////////////////////////////////////////////////////
 
     dpram_dc #(.widthad_a(13), .width_a(8)) mcu_rom
@@ -127,7 +127,7 @@ module champbas_rom
     );
 
     ////////////////////////////////////////////////////////////////////////
-    // Index 7 — prom: MAME ROM_REGION "proms", colour PROMs (palette +
+    // Index 7 — colour PROMs (palette +
     // pen->color LUT, one or two PROMs depending on set). Max real use
     // 0x220 (exctsccr: 3 PROMs).
     ////////////////////////////////////////////////////////////////////////
@@ -145,8 +145,8 @@ module champbas_rom
     );
 
     ////////////////////////////////////////////////////////////////////////
-    // Index 8 — gfx_p3: gfx1's plane-3 source ROM (e.g. 6_c5.bin), stored
-    // stores the raw ROM image; the nibble select (addr>=0x1000 ? high :
+    // Index 8 - exctsccr tile / sprite plane-2 source ROM (6_c5), stored raw;
+    // the video selects the nibble (address >= 0x1000 = high).
     ////////////////////////////////////////////////////////////////////////
 
     dpram_dc #(.widthad_a(13), .width_a(8)) gfx_p3_rom
@@ -162,7 +162,7 @@ module champbas_rom
     );
 
     ////////////////////////////////////////////////////////////////////////
-    // Index 9 — gfx3: MAME ROM_REGION "gfx3", 4bpp sprites. Exciting
+    // Index 9 - 4bpp sprites (Exciting Soccer family).
     ////////////////////////////////////////////////////////////////////////
 
     dpram_dc #(.widthad_a(13), .width_a(8)) gfx3_rom
