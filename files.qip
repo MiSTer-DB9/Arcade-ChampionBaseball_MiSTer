@@ -1,11 +1,14 @@
 set_global_assignment -name VHDL_INPUT_VERSION VHDL_2008
 
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/chip_pool_pkg.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_pool_pkg.sv
+
 set_global_assignment -name SYSTEMVERILOG_FILE Arcade-ChampionBaseball.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/ChampionBaseball.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/ChampionBaseball_SND.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/ExcitingSoccer_SND.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/ChampionBaseball_VIDEO.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/ChampionBaseball_MAIN.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/championbaseball_dispatcher.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/champbas/ChampionBaseball_MAIN.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/champbas/ChampionBaseball_VIDEO.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/champbas/ChampionBaseball_SND.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/exctsccr/ExcitingSoccer_SND.sv
 
 set_global_assignment -name QIP_FILE rtl/cpu/T80/T80.qip
 set_global_assignment -name QIP_FILE rtl/sound/v_sound.qip
@@ -13,18 +16,16 @@ set_global_assignment -name QIP_FILE rtl/sound/v_sound.qip
 set_global_assignment -name VERILOG_FILE rtl/mister_custom/pause.v
 set_global_assignment -name VERILOG_FILE rtl/mister_custom/nvram.v
 set_global_assignment -name VERILOG_FILE rtl/mister_custom/hiscore.v
-# CTL-2026-10-25: shared input library (controllers.sv v2)
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/mister_custom/controllers.sv
-
 
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/hmcs40/hmcs40_decoder.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/hmcs40/hmcs40.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/hmcs40/alpha8201.sv
 
-# DPRAMSV-2026-10-25: VHDL dpram_dc replaced by the SystemVerilog one (same ports/generics + byteena); original:
-# set_global_assignment -name VHDL_FILE rtl/ram_rom/dpram_dc.vhd
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_rom/dpram_dc.sv
-set_global_assignment -name VHDL_FILE rtl/ram_rom/spram.vhd
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_rom/rom_loader.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_rom/champbas_rom.sv
 
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/art/artwork.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/art/art_resample.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/art/png_decode.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/art/inflate.sv

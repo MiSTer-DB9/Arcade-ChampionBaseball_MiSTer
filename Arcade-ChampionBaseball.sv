@@ -221,11 +221,14 @@ wire [1:0] ar = status[14:13];
 wire [7:0] set_id;
 wire is_vertical = (set_id >= 8'h07);
 
-// got squashed into a 3:4 portrait window. Aspect must follow the SAME set_id split as the
+// aspect ratio follows the same set_id split as the rotation (vertical sets 3:4)
 wire horz = ~is_vertical | status[12];
 
-assign VIDEO_ARX = horz ? ((!ar) ? 12'd4 : (ar - 1'd1)) : ((!ar) ? 12'd3 : (ar - 1'd1));
-assign VIDEO_ARY = horz ? ((!ar) ? 12'd3 : 12'd0) : ((!ar) ? 12'd4 : 12'd0);
+wire        art_fb;                // artwork framebuffer on HDMI: square canvas pixels
+wire        art_wait, art_avail;
+wire [11:0] art_cw, art_ch;
+assign VIDEO_ARX = (!ar && art_fb) ? art_cw : horz ? ((!ar) ? 12'd4 : (ar - 1'd1)) : ((!ar) ? 12'd3 : (ar - 1'd1));
+assign VIDEO_ARY = (!ar && art_fb) ? art_ch : horz ? ((!ar) ? 12'd3 : 12'd0) : ((!ar) ? 12'd4 : 12'd0);
 
 `include "build_id.v"
 localparam CONF_STR = {
@@ -244,6 +247,16 @@ localparam CONF_STR = {
 	"P3,High Score Options;",
 	"P3OR,Autosave Hiscores,Off,On;",
 	"-;",
+	"H1P4,Game Options;",
+	"H1P4-,Artwork (MAME layout views);",
+	"H1P4O[50:48],View,Off,View 1,View 2,View 3,View 4,View 5,View 6,View 7;",
+	"H1P4O[51],Backdrop,On,Off;",
+	"H1P4O[52],Overlay,On,Off;",
+	"H1P4O[53],Bezel,On,Off;",
+	"H1P4O[56],Control Panel,On,Off;",
+	"H1P4O[54],Side Art,On,Off;",
+	"H1P4O[55],Zoom to Screen,Off,On;",
+	"H1-;",
 	// [MiSTer-DB9-Pro BEGIN] - Saturn-first joy_type (canonical bit notation)
 	"O[127:126],UserIO Joystick,Off,Saturn,DB9MD,DB15;",
 	"O[125],UserIO Players, 1 Player,2 Players;",
@@ -258,9 +271,7 @@ localparam CONF_STR = {
 
 wire        forced_scandoubler;
 wire  [1:0] buttons;
-// [MiSTer-DB9 BEGIN] - widened to 128 bits for joy_type at [127:126] and joy_2p at [125]
 wire [127:0] status;
-// [MiSTer-DB9 END]
 wire [10:0] ps2_key;
 
 wire        ioctl_download;
@@ -268,7 +279,8 @@ wire        ioctl_upload;
 wire        ioctl_upload_req;
 wire  [7:0] ioctl_index;
 wire        ioctl_wr;
-wire [24:0] ioctl_addr;
+wire [26:0] ioctl_addr27;                     // hps_io's full address: the artwork download can pass 32 MB
+wire [24:0] ioctl_addr = ioctl_addr27[24:0];  // every other ioctl user
 wire  [7:0] ioctl_dout;
 wire  [7:0] ioctl_din;
 
@@ -277,6 +289,7 @@ wire [15:0] joy = joystick_0 | joystick_1;
 
 wire [21:0] gamma_bus;
 wire        direct_video;
+wire        video_rotated;
 
 // [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: joydb wrapper
 wire         CLK_JOY = CLK_50M;                 // Assign clock between 40-50Mhz
@@ -371,15 +384,16 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 
 	.buttons(buttons),
 	.status(status),
-	.status_menumask({direct_video}),
+	.status_menumask({~art_avail, direct_video}),
 
 	.ioctl_download(ioctl_download),
 	.ioctl_upload(ioctl_upload),
 	.ioctl_upload_req(ioctl_upload_req),
 	.ioctl_wr(ioctl_wr),
-	.ioctl_addr(ioctl_addr),
+	.ioctl_addr(ioctl_addr27),
 	.ioctl_dout(ioctl_dout),
 	.ioctl_din(ioctl_din),
+	.ioctl_wait(art_wait),
 	.ioctl_index(ioctl_index),
 
 	.joystick_0(joystick_0_USB),
@@ -424,44 +438,8 @@ wire reset = RESET | status[0] | buttons[1] | ioctl_download;
 
 ///////////////////         Keyboard           //////////////////
 
-// CTL-2026-10-25: keyboard -> controllers.sv ctl_keyboard (keys now act on press), left Shift through its extra-key
-// table; the instance sits after pause_cpu below. Original commented out below.
-// reg btn_up       = 0;
-// reg btn_down     = 0;
-// reg btn_left     = 0;
-// reg btn_right    = 0;
-// reg btn_fire     = 0;
-// reg btn_fire2    = 0;
-// reg btn_coin1    = 0;
-// reg btn_coin2    = 0;
-// reg btn_1p_start = 0;
-// reg btn_2p_start = 0;
-// reg btn_pause    = 0;
-// reg btn_service  = 0;
-//
-// wire pressed = ~ps2_key[9];
-// wire [7:0] code = ps2_key[7:0];
-// always @(posedge CLK_49M) begin
-// 	reg old_state;
-// 	old_state <= ps2_key[10];
-// 	if(old_state != ps2_key[10]) begin
-// 		case(code)
-// 			'h16: btn_1p_start <= pressed; // 1 = Player 1 Start
-// 			'h1E: btn_2p_start <= pressed; // 2 = Player 2 Start
-// 			'h2E: btn_coin1    <= pressed; // 5 = Coin Input 1
-// 			'h36: btn_coin2    <= pressed; // 6 = Coin Input 2
-// 			'h4D: btn_pause    <= pressed; // P = Pause
-// 			'h46: btn_service  <= pressed; // 9 = Test Advance
-//
-// 			'h75: btn_up       <= pressed; // up         = Up
-// 			'h72: btn_down     <= pressed; // down       = Down
-// 			'h6B: btn_left     <= pressed; // left       = Left
-// 			'h74: btn_right    <= pressed; // right      = Right
-// 			'h14: btn_fire     <= pressed; // ctrl       = Draw Slow
-// 			'h12: btn_fire2    <= pressed; // left shift = Draw Fast
-// 		endcase 
-// 	end
-// end
+// keyboard -> controllers.sv ctl_keyboard (keys act on press), left Shift through its extra-key table;
+// the instance sits after pause_cpu below
 // kb: [0] up [1] down [2] left [3] right [4] Ctrl [5] Alt [6] 1 [7] 2 [8] 5 [9] 6 [10] 9 [11] T [12] P; kbx: [0] left Shift
 /* verilator lint_off UNUSED */
 wire [12:0] kb;                     // Alt and T are not used on this board
@@ -484,7 +462,7 @@ wire btn_service  = kb[10];
 
 //////////////////  Arcade Buttons/Interfaces   ///////////////////////////
 
-// champbas has THREE buttons (INPUT_PORTS champbas, champbas.cpp:761-771):
+// three buttons: Throw, Steal, Change
 
 //Player 1
 wire m_up1      = btn_up        | joystick_0[3];
@@ -514,9 +492,7 @@ wire m_pause    = btn_pause     | joystick_0[10];
 //Service Mode
 wire m_service  = btn_service                  ;
 
-// User reports Exciting Soccer's up/down inverted. Exciting Soccer boots
-// flip_screen=1 (maincpu.dasm $010C writes $00 to $A003) where champbas boots
-// affected. Left/right are deliberately NOT swapped — the report was
+// control swap for the flipped-screen sets: off, the plain mapping is HW-confirmed correct
 wire ctrl_flip_ud = 1'b0;
 
 wire m_up1_c   = ctrl_flip_ud ? m_down1 : m_up1;
@@ -524,18 +500,17 @@ wire m_down1_c = ctrl_flip_ud ? m_up1   : m_down1;
 wire m_up2_c   = ctrl_flip_ud ? m_down2 : m_up2;
 wire m_down2_c = ctrl_flip_ud ? m_up2   : m_down2;
 
-// reversed, which completes the picture — flip_screen=1 is a 180 deg transform,
 wire m_left1_c  = ctrl_flip_ud ? m_right1 : m_left1;
 wire m_right1_c = ctrl_flip_ud ? m_left1  : m_right1;
 wire m_left2_c  = ctrl_flip_ud ? m_right2 : m_left2;
 wire m_right2_c = ctrl_flip_ud ? m_left2  : m_right2;
 
-// MAME port assembly. All champbas inputs are IP_ACTIVE_LOW, so these invert.
+// input ports: all active low, so these invert
 wire [7:0] p1_port     = ~{m_down1_c, m_right1_c, m_left1_c, m_up1_c, m_steal1, m_change1, 1'b0, m_throw1};
 wire [7:0] p2_port     = ~{m_down2_c, m_right2_c, m_left2_c, m_up2_c, m_steal2, m_change2, 1'b0, m_throw2};
 wire [7:0] system_port = ~{4'b0000, m_coin2, m_coin1, m_start2, m_start1};
 
-// HISCORE DISABLED 2026-08-24 -- restore corrupts loaded data, cause not found.
+// HISCORE DISABLED: restore corrupts loaded data, cause not found.
 // Module tied off here AND index-3 commented out in every MRA. To re-enable:
 // restore the wire decls below, uncomment the hiscore instance further down,
 // and un-comment index 3 in the MRAs.
@@ -552,7 +527,7 @@ assign      ioctl_upload_req = 1'b0;
 
 // PAUSE SYSTEM
 wire pause_cpu;
-// CTL-2026-10-25: keyboard (see Keyboard above); held keys keep tracking while paused
+// keyboard (see Keyboard above); held keys keep tracking while paused
 ctl_keyboard #(.NX(1), .NXO(1), .XKEYS(24'h10_12_00)) u_kb(.clk(CLK_49M), .ps2_key(ps2_key), .pause(pause_cpu), .kb(kb),
 	.kbx(kbx));
 wire [23:0] rgb_out;
@@ -571,15 +546,74 @@ wire hblank, vblank;
 wire hs, vs;
 wire [7:0] r, g, b;
 wire ce_pix;
+wire bd_hblank, bd_vblank, bd_hs, bd_vs;
+wire [7:0] bd_r, bd_g, bd_b;
 
-// documented revert path ("arcade_video back to #(256,24) and drop .ce_pix below"). It existed to
+// MAME artwork (ioctl index 10: index 5 is the set id; OSD Game Options page): native composite on the core video
+// (one pixel late), full view through the DDR3 framebuffer on HDMI
+wire        art_run, art_ddr;
+wire [31:0] art_fb_base;
+wire  [7:0] art_burstcnt, art_be;
+wire [28:0] art_addr;
+wire [63:0] art_din;
+wire        art_rd, art_we, art_clk;
+artwork #(.IDX(8'd10)) artwork
+(
+	.clk(CLK_49M),
+	.sel({1'b0, status[50:48]}), .layer_off({status[56], status[53:51]}), .side_off(status[54]), .zoom(status[55]),
+	.crt_flip(status[22]), .hdmi_flip(status[11]), .turn(is_vertical & status[12]), .avail(art_avail),
+	.hdmi_w(HDMI_WIDTH), .hdmi_h(HDMI_HEIGHT),
+	.ioctl_download(ioctl_download), .ioctl_index(ioctl_index), .ioctl_wr(ioctl_wr),
+	.ioctl_addr(ioctl_addr27), .ioctl_dout(ioctl_dout), .ioctl_wait(art_wait),
+	.ce_pix(ce_pix),
+	.hs_in(bd_hs), .vs_in(bd_vs), .hblank_in(bd_hblank), .vblank_in(bd_vblank), .rgb_in({bd_r, bd_g, bd_b}),
+	.hs_out(hs), .vs_out(vs), .hblank_out(hblank), .vblank_out(vblank), .rgb_out({r, g, b}),
+	.running(art_run), .ddr_owner(art_ddr), .canvas_w(art_cw), .canvas_h(art_ch),
+	.fb_base(art_fb_base), .fb_vbl(FB_VBL),
+	.DDRAM_CLK(art_clk), .DDRAM_BUSY(DDRAM_BUSY), .DDRAM_BURSTCNT(art_burstcnt), .DDRAM_ADDR(art_addr),
+	.DDRAM_DOUT(DDRAM_DOUT), .DDRAM_DOUT_READY(DDRAM_DOUT_READY), .DDRAM_RD(art_rd),
+	.DDRAM_DIN(art_din), .DDRAM_BE(art_be), .DDRAM_WE(art_we)
+);
+// Orientation Horz (rotated monitor): the artwork turns its own view, so it keeps the framebuffer
+assign art_fb = art_run & ~direct_video;
+
 
 // ROTATION: champbas is ROT0 (horizontal). Talbot and the whole Exciting Soccer family are ROT270.
 //   0x00-0x06 champbas family (ROT0)   0x07 talbot   0x08-0x0A exctsccr family (both ROT270)
 wire rotate_ccw  = 1'b1;                                    // ROT270 = counter-clockwise
 wire no_rotate   = ~is_vertical | status[12] | direct_video;
 wire flip        = status[11];
-screen_rotate screen_rotate(.*);
+wire        sr_fb_en, sr_clk, sr_rd, sr_we;
+wire  [4:0] sr_fb_format;
+wire [11:0] sr_fb_w, sr_fb_h;
+wire [31:0] sr_fb_base;
+wire [13:0] sr_fb_stride;
+wire  [7:0] sr_burstcnt, sr_be;
+wire [28:0] sr_addr;
+wire [63:0] sr_din;
+screen_rotate screen_rotate
+(
+	.*,
+	.FB_EN(sr_fb_en), .FB_FORMAT(sr_fb_format), .FB_WIDTH(sr_fb_w), .FB_HEIGHT(sr_fb_h),
+	.FB_BASE(sr_fb_base), .FB_STRIDE(sr_fb_stride),
+	.DDRAM_CLK(sr_clk), .DDRAM_BURSTCNT(sr_burstcnt), .DDRAM_ADDR(sr_addr), .DDRAM_DIN(sr_din),
+	.DDRAM_BE(sr_be), .DDRAM_WE(sr_we), .DDRAM_RD(sr_rd)
+);
+
+// the artwork takes the framebuffer while it draws, and DDR3 while it loads or draws
+assign FB_EN     = art_fb | sr_fb_en;
+assign FB_FORMAT = art_fb ? 5'b00110  : sr_fb_format;
+assign FB_WIDTH  = art_fb ? art_cw    : sr_fb_w;
+assign FB_HEIGHT = art_fb ? art_ch    : sr_fb_h;
+assign FB_BASE   = art_fb ? art_fb_base : sr_fb_base;
+assign FB_STRIDE = art_fb ? 14'd8192  : sr_fb_stride;
+assign DDRAM_CLK      = CLK_49M;
+assign DDRAM_BURSTCNT = art_ddr ? art_burstcnt : sr_burstcnt;
+assign DDRAM_ADDR     = art_ddr ? art_addr : sr_addr;
+assign DDRAM_DIN      = art_ddr ? art_din : sr_din;
+assign DDRAM_BE       = art_ddr ? art_be : sr_be;
+assign DDRAM_WE       = art_ddr ? art_we : sr_we;
+assign DDRAM_RD       = art_ddr ? art_rd : sr_rd;
 
 arcade_video #(256,24) arcade_video
 (
@@ -604,9 +638,8 @@ always @(posedge CLK_49M) begin
 end
 wire [7:0] sw0 = dip_sw[0];
 
-ChampionBaseball championbaseball_inst
+championbaseball_dispatcher championbaseball_inst
 (
-	// in permanent reset: h_cnt/v_cnt never left 0, HSync/VSync were stuck low, no sync at all.
 	.reset(reset),        // MiSTer reset is active-high; champbas modules are active-high too
 
 	.clk_49m(CLK_49M),
@@ -618,15 +651,15 @@ ChampionBaseball championbaseball_inst
 
 	.set_id(set_id),
 
-	.video_hsync(hs),
-	.video_vsync(vs),
-	.video_vblank(vblank),
-	.video_hblank(hblank),
+	.video_hsync(bd_hs),
+	.video_vsync(bd_vs),
+	.video_vblank(bd_vblank),
+	.video_hblank(bd_hblank),
 	.ce_pix(ce_pix),
 
-	.video_r(r),
-	.video_g(g),
-	.video_b(b),
+	.video_r(bd_r),
+	.video_g(bd_g),
+	.video_b(bd_b),
 
 	.sound_l(audio_l),
 	.sound_r(audio_r),

@@ -2,7 +2,7 @@
 //
 //  ExcitingSoccer_SND.sv — exctsccr/exctscc2 sound board: a separate design
 //  from champbas, with 4x AY-3-8910 and 2 DACs.
-//  RAM is A000-A7FF; IM1 timer IRQ at $0038, NMI at $0066.
+//  RAM A000-A7FF; IM1 timer IRQ at 0038, NMI at 0066.
 //
 //============================================================================
 
@@ -12,10 +12,10 @@ module ExcitingSoccer_SND
     input                reset,
     input                pause,
 
-    // Soccer II drops ay3/ay4 and moves ay1/ay2 in I/O space (:690, :1141).
+    // Soccer II: ay3 / ay4 removed, ay1 / ay2 moved in I/O space
     input                is_exctscc2,
 
-    // ---- from the main board ($A080 write, champbasj_map)
+    // ---- from the main board (A080 write)
     input         [7:0]  sound_latch,
     input                sound_latch_wr,
 
@@ -23,13 +23,21 @@ module ExcitingSoccer_SND
     output       [15:0]  rom_addr,
     input         [7:0]  rom_data,
 
-    output signed [15:0] sound_out
+    output signed [15:0] sound_out,
+
+    // sound Z80 (z80_1), AYs (ay_0-3) and sound RAM (pool block 5) in the dispatcher
+    output chip_pool_pkg::z80r_i_t       z80_1_i,
+    input  chip_pool_pkg::z80r_o_t       z80_1_o,
+    output chip_pool_pkg::ayr_i_t  [3:0] ay_i,
+    input  chip_pool_pkg::ay_o_t   [3:0] ay_o,
+    output ram_pool_pkg::pram_i_t        pr_i,
+    input  ram_pool_pkg::pram_o_t        pr_o
 );
 
     ////////////////////////////////////////////////////////////////////////
     // Clock enables.
     //   Z80  14.318181/4 = 3.579545 MHz -> 3579545.25/49152000 * 2^24 = 1221797
-    //   AY   14.318181/8 = 1.789773 MHz -> derived as cen_z80/2, which is
+    //   AY   14.318181/8 = 1.789773 MHz -> cen_z80 / 2; exctsccr's AY 1 runs from its own (VR pot) clock
     ////////////////////////////////////////////////////////////////////////
 
     localparam [24:0] INC_Z80 = 25'd1221797;   // -> 3579545.6 Hz  (err 0.4 Hz)
@@ -51,8 +59,7 @@ module ExcitingSoccer_SND
     wire cen_ay1 = is_exctscc2 ? cen_ay : acc_ay1[24];  // VR pot on exctsccr
 
     ////////////////////////////////////////////////////////////////////////
-    // Interrupts (:1091-1095).
-    //                 Vector 0xFF is irrelevant — $0038 is populated, so the
+    // Interrupts: NMI and a timer IRQ (IM1, 0038 populated, so the vector byte is unused)
     ////////////////////////////////////////////////////////////////////////
 
     localparam [13:0] NMI_DIV = 14'd12287;    // 12288 counts, 0-based
@@ -97,8 +104,8 @@ module ExcitingSoccer_SND
     wire nmi_n_r = (nmi_cnt == 4'd0);
 
     ////////////////////////////////////////////////////////////////////////
-    // Memory decode — exctsccr_sound_map (:670)
-    //   0000-8FFF  ROM   (36 KB: 4 x 0x2000 + 1 x 0x1000, ROM_START :1401)
+    // Memory decode
+    //   0000-8FFF  ROM   (36 KB: 4 x 0x2000 + 1 x 0x1000)
     ////////////////////////////////////////////////////////////////////////
 
     wire mem_wr = ~mreq_n & ~wr_n;
@@ -113,7 +120,7 @@ module ExcitingSoccer_SND
     assign rom_addr = A;
 
     ////////////////////////////////////////////////////////////////////////
-    // Sound latch. Written by the MAIN CPU at $A080, read here at $C00D,
+    // Sound latch: written by the main CPU at A080, read at C00D, cleared by a C00C write
     ////////////////////////////////////////////////////////////////////////
 
     reg [7:0] latch_reg = 8'd0;
@@ -125,8 +132,7 @@ module ExcitingSoccer_SND
     end
 
     ////////////////////////////////////////////////////////////////////////
-    // Two 6-bit R2R DACs (:1128-1129). Same convention as the champbas DAC,
-    // which is HW-confirmed: the low 6 bits are the payload, 0x20 is mid.
+    // Two 6-bit R2R DACs, same convention as the champbas DAC: low 6 bits payload, 0x20 mid
     ////////////////////////////////////////////////////////////////////////
 
     reg [5:0] dac1_reg = 6'd32;
@@ -151,23 +157,16 @@ module ExcitingSoccer_SND
 
     wire [7:0] ram_dout;
 
-    dpram_dc #(.widthad_a(11), .width_a(8)) sound_ram
-    (
-        .clock_a(clk),
-        .address_a(A[10:0]),
-        .data_a(cpu_dout),
-        .wren_a(cen_z80 & mem_wr & cs_ram),
-        .q_a(ram_dout),
-
-        .clock_b(clk),
-        .address_b(11'd0),
-        .data_b(8'd0),
-        .wren_b(1'b0),
-        .q_b()
-    );
+    assign pr_i.a_addr = 15'(A[10:0]);
+    assign pr_i.a_d    = cpu_dout;
+    assign pr_i.a_we   = cen_z80 & mem_wr & cs_ram;
+    assign pr_i.b_addr = 15'(11'd0);
+    assign pr_i.b_d    = 8'd0;
+    assign pr_i.b_we   = 1'b0;
+    assign ram_dout = pr_o.a_q;
 
     ////////////////////////////////////////////////////////////////////////
-    // AY-3-8910 x4 on Z80 I/O SPACE (:681, :690) — not memory-mapped.
+    // 4 AYs in Z80 I/O space (not memory-mapped):  exctsccr | exctscc2
     //     ay1    0x82/0x83       0x8a/0x8b
     //     ay2    0x86/0x87       0x8e/0x8f
     //     ay3    0x8a/0x8b       (removed)
@@ -190,13 +189,17 @@ module ExcitingSoccer_SND
     wire [7:0] ay3A, ay3B, ay3C, ay4A, ay4B, ay4C;
 
     es_ay ay1 (.clk(clk), .rst_n(~reset), .cen(cen_ay1),
-               .wr(ay1_wr), .a0(A[0]), .din(cpu_dout), .A(ay1A), .B(ay1B), .C(ay1C));
+               .wr(ay1_wr), .a0(A[0]), .din(cpu_dout), .A(ay1A), .B(ay1B), .C(ay1C),
+               .ay_i(ay_i[0]), .ay_o(ay_o[0]));
     es_ay ay2 (.clk(clk), .rst_n(~reset), .cen(cen_ay),
-               .wr(ay2_wr), .a0(A[0]), .din(cpu_dout), .A(ay2A), .B(ay2B), .C(ay2C));
+               .wr(ay2_wr), .a0(A[0]), .din(cpu_dout), .A(ay2A), .B(ay2B), .C(ay2C),
+               .ay_i(ay_i[1]), .ay_o(ay_o[1]));
     es_ay ay3 (.clk(clk), .rst_n(~reset), .cen(cen_ay),
-               .wr(ay3_wr), .a0(A[0]), .din(cpu_dout), .A(ay3A), .B(ay3B), .C(ay3C));
+               .wr(ay3_wr), .a0(A[0]), .din(cpu_dout), .A(ay3A), .B(ay3B), .C(ay3C),
+               .ay_i(ay_i[2]), .ay_o(ay_o[2]));
     es_ay ay4 (.clk(clk), .rst_n(~reset), .cen(cen_ay),
-               .wr(ay4_wr), .a0(A[0]), .din(cpu_dout), .A(ay4A), .B(ay4B), .C(ay4C));
+               .wr(ay4_wr), .a0(A[0]), .din(cpu_dout), .A(ay4A), .B(ay4B), .C(ay4C),
+               .ay_i(ay_i[3]), .ay_o(ay_o[3]));
 
     ////////////////////////////////////////////////////////////////////////
     // DC removal — same shaping as the champbas board (raw byte into bit 5).
@@ -223,7 +226,7 @@ module ExcitingSoccer_SND
     jt49_dcrm2 #(16) r4C (.clk(clk), .cen(cen_dcrm), .rst(reset), .din({3'd0, ay4C, 5'd0}), .dout(d4C));
 
     ////////////////////////////////////////////////////////////////////////
-    // Mix. MAME (:1120-1129): each AY 0.08, each DAC 0.3
+    // Mix: each AY 0.08, each DAC 0.3 of the output (approximated with shifts below)
     ////////////////////////////////////////////////////////////////////////
 
     wire signed [19:0] ay_sum = {{4{d1A[15]}}, d1A} + {{4{d1B[15]}}, d1B} + {{4{d1C[15]}}, d1C}
@@ -252,30 +255,26 @@ module ExcitingSoccer_SND
         else                 cpu_din = 8'hFF;
     end
 
-    T80s cpu
-    (
-        .RESET_n(~reset),
-        .CLK(clk),
-        .CEN(cen_z80 & ~pause),
-        .WAIT_n(1'b1),
-        .INT_n(int_n_r),
-        .NMI_n(nmi_n_r),
-        .BUSRQ_n(1'b1),
-        .M1_n(m1_n),
-        .MREQ_n(mreq_n),
-        .IORQ_n(iorq_n),
-        .RD_n(rd_n),
-        .WR_n(wr_n),
-        .A(A),
-        .DI(cpu_din),
-        .DO(cpu_dout)
-    );
+    assign A      = z80_1_o.a;
+    assign cpu_dout = z80_1_o.dout;
+    assign m1_n   = z80_1_o.m1_n;
+    assign mreq_n = z80_1_o.mreq_n;
+    assign iorq_n = z80_1_o.iorq_n;
+    assign rd_n   = z80_1_o.rd_n;
+    assign wr_n   = z80_1_o.wr_n;
+
+    // pool slot inputs (driven here, after every signal they use is declared)
+    assign z80_1_i.reset_n = ~reset;
+    assign z80_1_i.ce      = cen_z80 & ~pause;
+    assign z80_1_i.int_n   = int_n_r;
+    assign z80_1_i.nmi_n   = nmi_n_r;
+    assign z80_1_i.di      = cpu_din;
 
 endmodule
 
 //============================================================================
 //  One AY-3-8910 with a stretched write strobe.
-//  The strobe MUST be stretched — this is the lesson the champbas board
+//  The strobe is held until the next AY clock enable (a Z80 write is shorter than an AY cycle).
 //============================================================================
 
 module es_ay
@@ -288,7 +287,9 @@ module es_ay
     input  [7:0] din,
     output [7:0] A,
     output [7:0] B,
-    output [7:0] C
+    output [7:0] C,
+    output chip_pool_pkg::ayr_i_t ay_i,   // the AY itself is a dispatcher pool slot
+    input  chip_pool_pkg::ay_o_t  ay_o
 );
 
     reg       pending = 1'b0;
@@ -304,21 +305,15 @@ module es_ay
         end else if (cen) pending <= 1'b0;
     end
 
-    jt49_bus #(.COMP(3'b100)) u
-    (
-        .rst_n  (rst_n),
-        .clk    (clk),
-        .clk_en (cen),
-        .bdir   (pending),
-        .bc1    (bc1_lat),
-        .din    (din_lat),
-        .sel    (1'b1),
-        .dout   (),
-        .A      (A),
-        .B      (B),
-        .C      (C),
-        .IOA_in (8'hFF),
-        .IOB_in (8'hFF)
-    );
+    assign ay_i.rst_n  = rst_n;
+    assign ay_i.ce     = cen;
+    assign ay_i.bdir   = pending;
+    assign ay_i.bc1    = bc1_lat;
+    assign ay_i.din    = din_lat;
+    assign ay_i.ioa_in = 8'hFF;
+    assign ay_i.iob_in = 8'hFF;
+    assign A = ay_o.a;
+    assign B = ay_o.b;
+    assign C = ay_o.c;
 
 endmodule

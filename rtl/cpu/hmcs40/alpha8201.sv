@@ -112,7 +112,7 @@ module alpha8201 #(
     // ------------------------------------------------------------------
     wire [3:0] r0_out, r1_out, r2_out, r3_out;
     wire [15:0] d_out;
-    wire        mcu_d_we;   // WR-EVENT-FIX-2026-08-01: true D-write strobe
+    wire        mcu_d_we;   // true D-write strobe
     wire        mcu_r_we;   // WR-EVENT-FIX rev2: true R-write strobe
     wire [2:0]  mcu_r_we_idx;
 
@@ -135,7 +135,7 @@ module alpha8201 #(
 
     // MCU side — read (mcu_data_r, alpha8201.cpp:364-376): R0 gets the
     wire [7:0] mcu_ram_rd = shared_ram[mcu_ram_addr];
-    // R-PORT-READBACK-FIX-2026-08-07 (part 2): MAME read_r() (hmcs40.cpp:387-396)
+    // (part 2): MAME read_r() (hmcs40.cpp:387-396)
     // IS_CMOS (hmcs40.cpp:123), so m_polarity is truthy -> the AND branch.
     // bus_dir=1 at $01B7 and leaves it, so the gate is open for the whole run.
     wire [3:0] r0_in = (mcu_rd_en ? mcu_ram_rd[7:4] : 4'h0) & r0_out;
@@ -189,7 +189,7 @@ module alpha8201 #(
         // (alpha8201.cpp:329 binds write_d only), and the core already applies
         .d_in       (16'hFFFF),
         .d_out      (d_out),
-        .d_we       (mcu_d_we),       // WR-EVENT-FIX-2026-08-01
+        .d_we       (mcu_d_we),
         .r_we       (mcu_r_we),       // WR-EVENT-FIX rev2
         .r_we_idx   (mcu_r_we_idx),
 
