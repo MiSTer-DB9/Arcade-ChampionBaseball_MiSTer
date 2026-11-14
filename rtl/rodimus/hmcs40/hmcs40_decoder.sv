@@ -1,5 +1,9 @@
 //============================================================================
 //  hmcs40_decoder — standalone combinational HMCS40 opcode decoder.
+//  SPDX-License-Identifier: BSD-3-Clause
+//  Copyright (C) 2026 Rodimus
+//  Derived from MAME src/devices/cpu/hmcs40/{hmcs40.cpp,hmcs40op.cpp}
+//  (license:BSD-3-Clause, copyright-holders: hap).
 //============================================================================
 
 module hmcs40_decoder (

@@ -3,7 +3,9 @@
 //  alpha8201 — ALPHA-8201 protection MCU wrapper: an hmcs40 core plus the
 //  shared-RAM glue the champbas family drives it through.
 //
-//  Ported from MAME's alpha8201.cpp (license BSD-3-Clause, copyright hap).
+//  SPDX-License-Identifier: BSD-3-Clause
+//  Copyright (C) 2026 Rodimus
+//  Ported from MAME src/mame/alpha/alpha8201.cpp (license:BSD-3-Clause, copyright-holders: hap).
 //
 //  mcu_start / bus_dir  <- LS259 mainlatch Q6/Q7 (champbas.cpp:935-936)
 //  ext_*                <- champbas_map 0x6000-0x63FF shared RAM
