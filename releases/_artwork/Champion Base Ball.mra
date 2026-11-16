@@ -35,21 +35,21 @@
         <dip bits="5"   name="Difficulty" ids="Hard,Easy"/>
     </switches>
 
-    <!-- Index 0: Main CPU ROMs (0x6000) -->
+    <!-- Index 0: ROM -->
     <rom index="0" md5="none" zip="champbas.zip">
         <part crc="218de21e" name="champbb.1"/>
         <part crc="5ddd872e" name="champbb.2"/>
         <part crc="f39a7046" name="champbb.3"/>
     </rom>
 
-    <!-- Index 1: Sound CPU ROMs (0x6000) -->
+    <!-- Index 1: ROM -->
     <rom index="1" md5="none" zip="champbas.zip">
         <part crc="26ab3e16" name="champbb.6"/>
         <part crc="7c01715f" name="champbb.7"/>
         <part crc="3c911786" name="champbb.8"/>
     </rom>
 
-    <!-- Index 2: GFX (0x4000), de-interleaved here so the core loader stays dumb.  -->
+    <!-- Index 2: ROM -->
     <rom index="2" md5="none" zip="champbas.zip">
         <part crc="1930fb52" name="champbb.4" offset="0x0000" length="0x1000"/>
         <part crc="a4cef5a1" name="champbb.5" offset="0x0000" length="0x1000"/>
@@ -57,36 +57,22 @@
         <part crc="a4cef5a1" name="champbb.5" offset="0x1000" length="0x1000"/>
     </rom>
 
-    <!-- Index 7: PROMs (0x120) -->
+    <!-- Index 7: ROM -->
     <rom index="7" md5="none" zip="champbas.zip">
         <part crc="2585ffb0" name="champbb.pr2"/>
         <part crc="872dd450" name="champbb.pr1"/>
     </rom>
 
-    <!-- Index 5: game-select byte: 
-           0x00 champbas    0x01 champbasj   0x02 champbasja  0x03 champbasjb
-           0x04 champbb2    0x05 champbb2j   0x06 tbasebal    0x07 talbot
-           0x08 exctsccr    0x09 exctscc2    0x0A exctsccrb                   -->
+    <!-- Index 5: Config -->
     <rom index="5"><part>00</part></rom>
 
-    <!-- Index 3: HiScore data - not working
-    <rom index="3" md5="none">
-        <part>
-        00 00 FF FF 00 FF 00 10 00 10 00 08 FF FF 00 00
-        00 00 8C 30 00 2F 40 00
-        00 00 8C 5C 00 01 05 05
-        </part>
-    </rom>
-    -->
-
-    <!-- Index 4: hiscore data. 0x2F + 0x01 = 48 bytes -->
+    <!-- Index 4: NVRAM -->
     <rom index="4"></rom>
     <nvram index="4" size="48"></nvram>
 
     <remark>Champion Base Ball (Alpha Denshi, Sega license)</remark>
     <mratimestamp>20260824000000</mratimestamp>
-    <!-- Index 10: MAME artwork, layout table (from default.lay) + PNGs from the artwork zip, as-is -->
-    <!-- OSD Artwork: View 1 = Upright Artwork -->
+    <!-- Index 10: Artwork -->
     <rom index="10" md5="none" zip="/mame-artwork/champbas.zip">
         <part>
             41 57 01 00 01 00 00 01 E0 00 00 00 00 00 00 00 C8 02 76 02 64 00 7C 00 00 02 80 01 00 60 01 00

@@ -1,67 +1,50 @@
-//============================================================================
-//
-//  Champion Baseball dispatcher: shared CPU / MCU / sound chip / ROM / RAM pools + the boards (rtl/boards/)
 //  Copyright (C) 2026 Rodimus
-//
-//    49.152 / 16 = 3.072 MHz = XTAL 18.432 / 6  -> both Z80s
-//    49.152 /  8 = 6.144 MHz = XTAL 18.432 / 3  -> pixel clock
-//
-//============================================================================
 
 module championbaseball_dispatcher
 (
     input                reset,
     input                clk_49m,
 
-    // ---- controls, assembled into the board's port order by the wrapper
     input          [7:0] p1,
     input          [7:0] p2,
-    input          [7:0] dsw,          // bit 7 is ignored; the main board substitutes the watchdog bit
+    input          [7:0] dsw,
     input          [7:0] system,
 
-    // ---- video
     output               video_hsync, video_vsync,
     output               video_hblank, video_vblank,
     output               ce_pix,
     output         [7:0] video_r, video_g, video_b,
 
-    // ---- audio
     output signed [15:0] sound_l,
     output signed [15:0] sound_r,
 
-    // ---- ROM download
     input         [24:0] ioctl_addr,
     input          [7:0] ioctl_data,
     input                ioctl_wr,
     input          [7:0] ioctl_index,
     input                ioctl_download,
 
-    output         [7:0] set_id,       // MRA index 5, exposed for the wrapper's OSD/rotation logic
+    output         [7:0] set_id,
 
-    // ---- hiscore RAM access (routed inside MAIN to main RAM or the 7C00 block)
     input         [15:0] hs_addr,
     input          [7:0] hs_din,
     output         [7:0] hs_dout,
     input                hs_we,
     input                hs_active,
 
-    input                crt_flip,     // OSD CRT Flip — raster mirror in VIDEO (game flip stays separate)
+    input                crt_flip,
 
     input                pause
 );
 
-//------------------------------------------------------- Clock enables -------------------------------------------------------//
-
 reg [4:0] cen_cnt = 5'd0;
 always_ff @(posedge clk_49m) cen_cnt <= cen_cnt + 5'd1;
 
-wire cen_cpu = (cen_cnt[3:0] == 4'd0);   // 1-in-16 -> 3.072 MHz  (18.432/6)
-wire cen_pix = (cen_cnt[2:0] == 3'd0);   // 1-in-8  -> 6.144 MHz  (18.432/3)
-wire cen_ay  = (cen_cnt      == 5'd0);   // 1-in-32 -> 1.536 MHz  (18.432/12)
+wire cen_cpu = (cen_cnt[3:0] == 4'd0);
+wire cen_pix = (cen_cnt[2:0] == 3'd0);
+wire cen_ay  = (cen_cnt      == 5'd0);
 
 assign ce_pix = cen_pix;
-
-//------------------------------------------------------- ROM regions ---------------------------------------------------------//
 
 wire [14:0] maincpu_addr;
 wire  [7:0] maincpu_data;
@@ -102,13 +85,8 @@ champbas_rom rom
 
     .gfx3_addr(gfx3_addr),         .gfx3_data(gfx3_data),
 
-    // ALPHA MCU program (index 6) for pool slot mcu_0
     .mcu_addr(mcu_addr),           .mcu_data(mcu_data)
 );
-
-//------------------------------------------------------- Chip pool -----------------------------------------------------------//
-// z80_0 main Z80 / mcu_0 ALPHA MCU (main board); z80_1 sound Z80 and ay_0 (one sound board at a time, use_exctsccr_snd);
-// ay_1-3 the Exciting Soccer board's other AYs
 
 wire use_exctsccr_snd = (set_id == 8'h08) || (set_id == 8'h09);
 
@@ -123,14 +101,14 @@ chip_pool_pkg::ay_o_t  [3:0] ay_o;
 assign z80_1_i = use_exctsccr_snd ? es_z80_i : cb_z80_i;
 assign ay_i    = use_exctsccr_snd ? es_ay_i : {es_ay_i[3:1], cb_ay_i};
 
-T80s z80_0
+t80sv_T80s z80_0
 (
     .RESET_n(z80_0_i.reset_n), .CLK(clk_49m), .CEN(z80_0_i.ce), .WAIT_n(1'b1), .INT_n(z80_0_i.int_n), .NMI_n(z80_0_i.nmi_n),
     .BUSRQ_n(1'b1), .M1_n(z80_0_o.m1_n), .MREQ_n(z80_0_o.mreq_n), .IORQ_n(z80_0_o.iorq_n), .RD_n(z80_0_o.rd_n),
     .WR_n(z80_0_o.wr_n), .RFSH_n(z80_0_o.rfsh_n), .A(z80_0_o.a), .DI(z80_0_i.di), .DO(z80_0_o.dout)
 );
 
-T80s z80_1
+t80sv_T80s z80_1
 (
     .RESET_n(z80_1_i.reset_n), .CLK(clk_49m), .CEN(z80_1_i.ce), .WAIT_n(1'b1), .INT_n(z80_1_i.int_n), .NMI_n(z80_1_i.nmi_n),
     .BUSRQ_n(1'b1), .M1_n(z80_1_o.m1_n), .MREQ_n(z80_1_o.mreq_n), .IORQ_n(z80_1_o.iorq_n), .RD_n(z80_1_o.rd_n),
@@ -157,8 +135,6 @@ generate
     end
 endgenerate
 
-//------------------------------------------------------- Board RAM pool ------------------------------------------------------//
-// block      main board                      sound board
 //   0  2K    work RAM 8800 (port B hiscore)
 //   1  1K    ext RAM 6000 (no-MCU sets)
 //   2  1K    RAM 7C00 (Exciting Soccer, port B hiscore)
@@ -202,8 +178,6 @@ dpram_dc #(.widthad_a(11), .width_a(8)) ram_5
     .clock_a(clk_49m), .wren_a(pool_i[5].a_we), .address_a(pool_i[5].a_addr[10:0]), .data_a(pool_i[5].a_d), .q_a(pool_o[5].a_q),
     .clock_b(clk_49m), .wren_b(pool_i[5].b_we), .address_b(pool_i[5].b_addr[10:0]), .data_b(pool_i[5].b_d), .q_b(pool_o[5].b_q)
 );
-
-//------------------------------------------------------- Main board ----------------------------------------------------------//
 
 wire [7:0] ay_din;
 wire       ay_addr_wr, ay_data_wr;
@@ -275,16 +249,11 @@ ChampionBaseball_MAIN main_board
     .pr_i(m_pr_i), .pr_o(pool_o[4:0])
 );
 
-//------------------------------------------------------- Sound board ---------------------------------------------------------//
-
-// exctsccr / exctscc2 have their own sound board (14.318181 MHz crystal, 4 AYs, 2 DACs); the exctsccrb bootleg (0A)
-// uses the champbas sound board
 wire signed [15:0] snd_mono;
 wire signed [15:0] snd_exctsccr;
 wire        [15:0] audiocpu_addr_cb;
 wire        [15:0] audiocpu_addr_es;
 
-// Only one board is selected at a time; both share the index-1 audio ROM port.
 assign audiocpu_addr = use_exctsccr_snd ? audiocpu_addr_es : audiocpu_addr_cb;
 
 ChampionBaseball_SND snd_board
@@ -298,7 +267,6 @@ ChampionBaseball_SND snd_board
     .sound_latch(sound_latch),
     .sound_latch_wr(sound_latch_wr),
 
-    // The AY physically lives on the MAIN board and is written by the MAIN CPU
     .ay_din(ay_din),
     .ay_addr_wr(ay_addr_wr),
     .ay_data_wr(ay_data_wr),
@@ -332,7 +300,6 @@ ExcitingSoccer_SND snd_board_es
 
 wire signed [15:0] snd_sel = use_exctsccr_snd ? snd_exctsccr : snd_mono;
 
-// Both boards are mono — one SPEAKER each
 assign sound_l = snd_sel;
 assign sound_r = snd_sel;
 

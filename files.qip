@@ -10,17 +10,17 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/champbas/ChampionBaseb
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/champbas/ChampionBaseball_SND.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/exctsccr/ExcitingSoccer_SND.sv
 
-set_global_assignment -name QIP_FILE rtl/cpu/T80/T80.qip
-set_global_assignment -name QIP_FILE rtl/sound/v_sound.qip
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/t80sv/t80sv_all.sv
+set_global_assignment -name QIP_FILE rtl/sound/jt49/hdl/jt49.qip
+set_global_assignment -name VERILOG_FILE rtl/sound/jt49/hdl/filter/jt49_dcrm2.v
 
 set_global_assignment -name VERILOG_FILE rtl/mister_custom/pause.v
-set_global_assignment -name VERILOG_FILE rtl/mister_custom/nvram.v
 set_global_assignment -name VERILOG_FILE rtl/mister_custom/hiscore.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/mister_custom/controllers.sv
 
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/hmcs40/hmcs40_decoder.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/hmcs40/hmcs40.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/hmcs40/alpha8201.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/hmcs40/hmcs40_decoder.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/hmcs40/hmcs40.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/hmcs40/alpha8201.sv
 
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_rom/dpram_dc.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_rom/champbas_rom.sv
